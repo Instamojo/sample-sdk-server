@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/Instamojo/sample-sdk-server/lib"
 	"github.com/gorilla/mux"
@@ -42,7 +44,14 @@ func main() {
 	router.HandleFunc("/refund/", refundHandler).Methods("POST")
 	router.HandleFunc("/ping", pingHandler).Methods("GET")
 
-	log.Fatal(http.ListenAndServe(":8080", LoggingHandler(router)))
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	serverAddr := fmt.Sprintf(":%s", port)
+	fmt.Printf("Starting server on port %s\n", port)
+	log.Fatal(http.ListenAndServe(serverAddr, LoggingHandler(router)))
 }
 
 func createOrderTokens(w http.ResponseWriter, r *http.Request) {
