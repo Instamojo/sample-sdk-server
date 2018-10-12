@@ -3,17 +3,17 @@ package lib
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"io/ioutil"
-	"math/rand"
+	"log"
 	"net/http"
 	"net/url"
-	"time"
+	"strings"
+
+	"github.com/instamojo/sample-sdk-server/config"
+	"github.com/instamojo/sample-sdk-server/model"
 )
 
-const PROD_URL = "https://api.instamojo.com"
-const TEST_URL = "https://test.instamojo.com"
+const testENV = "test"
+const prodENV = "production"
 
 var refundTypes = map[string]string{
 	"RFD": "Duplicate/delayed payment.",
@@ -25,128 +25,176 @@ var refundTypes = map[string]string{
 	"PTH": "Problem not described above.",
 }
 
-type credentials struct {
-	prodClientID     string
-	prodClientSecret string
-	testClientID     string
-	testClientSecret string
+var env string
+var clientID string
+var clientSecret string
+var imojoURL string
+var client http.Client
+
+func init() {
+	client = http.Client{}
+	setDefaultEnvironment()
 }
 
-var creds credentials
+func setDefaultEnvironment() {
+	// Defaults to test config
+	env = testENV
+	imojoURL = config.Config.TestURL
+	clientID = config.Config.TestClientID
+	clientSecret = config.Config.TestClientSecret
+}
 
-//SetCredentials will take in production and test credentials of the User
-func SetCredentials(prodClientID, prodClientSecret, testClientID, testClientSecret string) {
-	creds = credentials{
-		prodClientID:     prodClientID,
-		prodClientSecret: prodClientSecret,
-		testClientID:     testClientID,
-		testClientSecret: testClientSecret,
+func setEnviroment(newEnv string) {
+	// Don't change if already set
+	if env == newEnv {
+		return
+	}
+
+	if env == prodENV {
+		env = prodENV
+		imojoURL = config.Config.ProdURL
+		clientID = config.Config.ProdClientID
+		clientSecret = config.Config.ProdClientSecret
+
+	} else {
+		setDefaultEnvironment()
 	}
 }
 
-//CreateOrderTokens will return necessary token in []byte format
-func CreateOrderTokens(env string) ([]byte, error) {
-	authUrl := PROD_URL
-	id := creds.prodClientID
-	secret := creds.prodClientSecret
-	if env == "test" {
-		authUrl = TEST_URL
-		id = creds.testClientID
-		secret = creds.testClientSecret
-	}
-
-	authUrl += "/oauth2/token/"
+func fetchToken() (*model.OAuth2Token, error) {
+	log.Println("Fetching new access token")
 	values := url.Values{}
-	values.Set("client_id", id)
-	values.Set("client_secret", secret)
+	values.Set("client_id", clientID)
+	values.Set("client_secret", clientSecret)
 	values.Set("grant_type", "client_credentials")
-	authRequest, err := http.NewRequest("POST", authUrl, bytes.NewBufferString(values.Encode()))
+	httpRequest, err := http.NewRequest("POST", imojoURL+"/oauth2/token/", bytes.NewBufferString(values.Encode()))
 	if err != nil {
-		return []byte(""), err
+		return nil, err
 	}
 
-	authRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	client := &http.Client{}
-	resp, err := client.Do(authRequest)
+	httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	httpResponse, err := client.Do(httpRequest)
 	if err != nil {
-		return []byte(""), err
-	}
-	defer resp.Body.Close()
-
-	data, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return []byte(""), err
+		return nil, err
 	}
 
-	var jsonResponse struct {
-		AccessToken   string `json:"access_token,omitempty"`
-		Error         string `json:"error,omitempty"`
-		TransactionID string `json:"transaction_id,omitempty"`
+	token := &model.OAuth2Token{}
+	decodeErr := json.NewDecoder(httpResponse.Body).Decode(token)
+	if decodeErr != nil {
+		return nil, decodeErr
 	}
 
-	if err = json.Unmarshal(data, &jsonResponse); err != nil {
-		return []byte(""), err
-	}
-
-	if jsonResponse.AccessToken != "" {
-		jsonResponse.TransactionID = generateRandomString(15)
-	}
-
-	marshalledData, err := json.Marshal(jsonResponse)
-	if err != nil {
-		return []byte(""), err
-	}
-
-	return marshalledData, nil
+	return token, nil
 }
 
-func generateRandomString(strlen int) string {
-	rand.Seed(time.Now().UTC().UnixNano())
-	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-	result := make([]byte, strlen)
-	for i := 0; i < strlen; i++ {
-		result[i] = chars[rand.Intn(len(chars))]
+// CreateOrder will create a new payment order and returns the same
+func CreateOrder(request model.GetOrderIDRequest) (*model.Order, error) {
+	setEnviroment(strings.ToLower(request.Env))
+
+	// Create payment request
+	paymentRequest, prErr := createPaymentRequest(request)
+	if prErr != nil {
+		return nil, prErr
 	}
-	return string(result)
+
+	// Create an order for a payment request
+	order, oErr := createOrderForPR(paymentRequest.ID)
+	if oErr != nil {
+		return nil, oErr
+	}
+
+	log.Printf("Created order with ID %s", order.OrderID)
+	return order, nil
+}
+
+func createPaymentRequest(getOrderIDRequest model.GetOrderIDRequest) (*model.PaymentRequest, error) {
+	log.Println("Creating payment request")
+	paymentRequest := model.PaymentRequest{}
+	paymentRequest.BuyerName = getOrderIDRequest.BuyerName
+	paymentRequest.Email = getOrderIDRequest.BuyerEmail
+	paymentRequest.Phone = getOrderIDRequest.BuyerPhone
+	paymentRequest.Amount = getOrderIDRequest.Amount
+	paymentRequest.Purpose = getOrderIDRequest.Description
+
+	jsonPaymentRequest, _ := json.Marshal(paymentRequest)
+	httpRequest, _ := http.NewRequest("POST", imojoURL+"/v2/payment_requests/", bytes.NewBuffer(jsonPaymentRequest))
+	token, tErr := fetchToken()
+	if tErr != nil {
+		return nil, tErr
+	}
+
+	httpRequest.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	httpRequest.Header.Set("Content-Type", "application/json")
+
+	httpResponse, err := client.Do(httpRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	var createdPaymentRequest model.PaymentRequest
+	decodeErr := json.NewDecoder(httpResponse.Body).Decode(&createdPaymentRequest)
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+
+	return &createdPaymentRequest, nil
+}
+
+func createOrderForPR(paymentRequestID string) (*model.Order, error) {
+	log.Println("Creating order for payment request")
+	orderRequest := model.OrderRequest{}
+	orderRequest.PaymentRequestID = paymentRequestID
+
+	jsonOrderRequest, _ := json.Marshal(orderRequest)
+	httpRequest, _ := http.NewRequest("POST", imojoURL+"/v2/gateway/orders/payment-request/", bytes.NewBuffer(jsonOrderRequest))
+	token, tErr := fetchToken()
+	if tErr != nil {
+		return nil, tErr
+	}
+
+	httpRequest.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	httpRequest.Header.Set("Content-Type", "application/json")
+
+	httpResponse, err := client.Do(httpRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	var createdOrder model.Order
+	decodeErr := json.NewDecoder(httpResponse.Body).Decode(&createdOrder)
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+
+	return &createdOrder, nil
 }
 
 //GetOrderStatus return the status of the order referencing either orderID or transactionID. Preference will be given to
 //orderID
 func GetOrderStatus(env, authorizationHeader, orderID, transactionID string) ([]byte, error) {
-	statusURL := PROD_URL
-	if env == "test" {
-		statusURL = TEST_URL
-	}
-
-	statusURL += "/v2/gateway/orders/"
-	if orderID == "" {
-		statusURL += "transaction_id:" + transactionID + "/"
-	} else {
-		statusURL += "id:" + orderID + "/"
-	}
-
-	statusRequest, err := http.NewRequest("GET", statusURL, nil)
-	if err != nil {
-		return []byte(""), err
-	}
-
-	statusRequest.Header.Set("Authorization", authorizationHeader)
-	statusRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	client := &http.Client{}
-	resp, err := client.Do(statusRequest)
-	if err != nil {
-		return []byte(""), err
-	}
-
-	data, err := ioutil.ReadAll(resp.Body)
-	defer resp.Body.Close()
-
-	if err != nil {
-		return []byte(""), err
-	}
-
-	return data, nil
+	// statusRequest, err := http.NewRequest("GET", imojoURL+"/v2/gateway/orders/", nil)
+	// if err != nil {
+	// 	return []byte(""), err
+	// }
+	//
+	// statusRequest.Header.Set("Authorization", authorizationHeader)
+	// statusRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	//
+	// client := &http.Client{}
+	// resp, err := client.Do(statusRequest)
+	// if err != nil {
+	// 	return []byte(""), err
+	// }
+	//
+	// data, err := ioutil.ReadAll(resp.Body)
+	// defer resp.Body.Close()
+	//
+	// if err != nil {
+	// 	return []byte(""), err
+	// }
+	//
+	// return data, nil
+	return []byte(""), nil
 }
 
 //InitiateRefund wil initiate refund for the paymentID for the given with given refund reason
@@ -159,69 +207,70 @@ func GetOrderStatus(env, authorizationHeader, orderID, transactionID string) ([]
 //TAN: Event was canceled/changed.
 //PTH: Problem not described above.
 func InitiateRefund(env, authorizationHeader, transactionID, amount, refundType, body string) (int, error) {
-	refundURL := PROD_URL
-	if env == "test" {
-		refundURL = TEST_URL
-	}
-
-	if _, exist := refundTypes[refundType]; !exist {
-		return http.StatusBadRequest, errors.New("Invalid refund type " + refundType)
-	}
-
-	data, err := GetOrderStatus(env, authorizationHeader, "", transactionID)
-	if err != nil {
-		return http.StatusInternalServerError, err
-	}
-
-	var jsonResponse struct {
-		ID            string `json:"id"`
-		TransactionID string `json:"transaction_id"`
-		Payments      []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-		} `json:"payments"`
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-	}
-
-	if err := json.Unmarshal(data, &jsonResponse); err != nil {
-		return http.StatusInternalServerError, err
-	}
-
-	if jsonResponse.Success || len(jsonResponse.Payments) < 1 {
-		return http.StatusBadRequest, errors.New(jsonResponse.Message)
-	}
-
-	status := jsonResponse.Payments[0].Status
-	paymentID := jsonResponse.Payments[0].ID
-
-	if status != "successful" {
-		return http.StatusBadRequest, errors.New("Cannot initiate refund for an Unsuccessful transaction")
-	}
-
-	refundURL += fmt.Sprintf("/v2/payments/%s/refund/", paymentID)
-	params := url.Values{}
-	params.Set("type", refundType)
-	params.Set("refund_amount", amount)
-	params.Set("body", body)
-
-	refundRequest, err := http.NewRequest("POST", refundURL, bytes.NewBufferString(params.Encode()))
-	if err != nil {
-		return http.StatusInternalServerError, err
-	}
-
-	refundRequest.Header.Set("Authorization", authorizationHeader)
-	refundRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	client := &http.Client{}
-	resp, err := client.Do(refundRequest)
-	if err != nil {
-		return http.StatusInternalServerError, err
-	}
-	_, err = ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return http.StatusInternalServerError, err
-	}
-
-	return resp.StatusCode, nil
+	// refundURL := PROD_URL
+	// if env == "test" {
+	// 	refundURL = TEST_URL
+	// }
+	//
+	// if _, exist := refundTypes[refundType]; !exist {
+	// 	return http.StatusBadRequest, errors.New("Invalid refund type " + refundType)
+	// }
+	//
+	// data, err := GetOrderStatus(env, authorizationHeader, "", transactionID)
+	// if err != nil {
+	// 	return http.StatusInternalServerError, err
+	// }
+	//
+	// var jsonResponse struct {
+	// 	ID            string `json:"id"`
+	// 	TransactionID string `json:"transaction_id"`
+	// 	Payments      []struct {
+	// 		ID     string `json:"id"`
+	// 		Status string `json:"status"`
+	// 	} `json:"payments"`
+	// 	Success bool   `json:"success"`
+	// 	Message string `json:"message"`
+	// }
+	//
+	// if err := json.Unmarshal(data, &jsonResponse); err != nil {
+	// 	return http.StatusInternalServerError, err
+	// }
+	//
+	// if jsonResponse.Success || len(jsonResponse.Payments) < 1 {
+	// 	return http.StatusBadRequest, errors.New(jsonResponse.Message)
+	// }
+	//
+	// status := jsonResponse.Payments[0].Status
+	// paymentID := jsonResponse.Payments[0].ID
+	//
+	// if status != "successful" {
+	// 	return http.StatusBadRequest, errors.New("Cannot initiate refund for an Unsuccessful transaction")
+	// }
+	//
+	// refundURL += fmt.Sprintf("/v2/payments/%s/refund/", paymentID)
+	// params := url.Values{}
+	// params.Set("type", refundType)
+	// params.Set("refund_amount", amount)
+	// params.Set("body", body)
+	//
+	// refundRequest, err := http.NewRequest("POST", refundURL, bytes.NewBufferString(params.Encode()))
+	// if err != nil {
+	// 	return http.StatusInternalServerError, err
+	// }
+	//
+	// refundRequest.Header.Set("Authorization", authorizationHeader)
+	// refundRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	//
+	// client := &http.Client{}
+	// resp, err := client.Do(refundRequest)
+	// if err != nil {
+	// 	return http.StatusInternalServerError, err
+	// }
+	// _, err = ioutil.ReadAll(resp.Body)
+	// if err != nil {
+	// 	return http.StatusInternalServerError, err
+	// }
+	//
+	// return resp.StatusCode, nil
+	return 0, nil
 }
