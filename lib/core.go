@@ -3,6 +3,8 @@ package lib
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -223,71 +225,72 @@ func GetOrderStatus(env, orderID, transactionID string) ([]byte, error) {
 //EWN: Digital download issue.
 //TAN: Event was canceled/changed.
 //PTH: Problem not described above.
-func InitiateRefund(env, authorizationHeader, transactionID, amount, refundType, body string) (int, error) {
-	// refundURL := PROD_URL
-	// if env == "test" {
-	// 	refundURL = TEST_URL
-	// }
-	//
-	// if _, exist := refundTypes[refundType]; !exist {
-	// 	return http.StatusBadRequest, errors.New("Invalid refund type " + refundType)
-	// }
-	//
-	// data, err := GetOrderStatus(env, authorizationHeader, "", transactionID)
-	// if err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	//
-	// var jsonResponse struct {
-	// 	ID            string `json:"id"`
-	// 	TransactionID string `json:"transaction_id"`
-	// 	Payments      []struct {
-	// 		ID     string `json:"id"`
-	// 		Status string `json:"status"`
-	// 	} `json:"payments"`
-	// 	Success bool   `json:"success"`
-	// 	Message string `json:"message"`
-	// }
-	//
-	// if err := json.Unmarshal(data, &jsonResponse); err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	//
-	// if jsonResponse.Success || len(jsonResponse.Payments) < 1 {
-	// 	return http.StatusBadRequest, errors.New(jsonResponse.Message)
-	// }
-	//
-	// status := jsonResponse.Payments[0].Status
-	// paymentID := jsonResponse.Payments[0].ID
-	//
-	// if status != "successful" {
-	// 	return http.StatusBadRequest, errors.New("Cannot initiate refund for an Unsuccessful transaction")
-	// }
-	//
-	// refundURL += fmt.Sprintf("/v2/payments/%s/refund/", paymentID)
-	// params := url.Values{}
-	// params.Set("type", refundType)
-	// params.Set("refund_amount", amount)
-	// params.Set("body", body)
-	//
-	// refundRequest, err := http.NewRequest("POST", refundURL, bytes.NewBufferString(params.Encode()))
-	// if err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	//
-	// refundRequest.Header.Set("Authorization", authorizationHeader)
-	// refundRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	//
-	// client := &http.Client{}
-	// resp, err := client.Do(refundRequest)
-	// if err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	// _, err = ioutil.ReadAll(resp.Body)
-	// if err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	//
-	// return resp.StatusCode, nil
-	return 0, nil
+func InitiateRefund(env, transactionID, amount, refundType, body string) (int, error) {
+	setEnviroment(env)
+
+	if _, exist := refundTypes[refundType]; !exist {
+		return http.StatusBadRequest, errors.New("Invalid refund type " + refundType)
+	}
+
+	data, err := GetOrderStatus(env, "", transactionID)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	var jsonResponse struct {
+		ID            string `json:"id"`
+		TransactionID string `json:"transaction_id"`
+		Payments      []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"payments"`
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+
+	if err := json.Unmarshal(data, &jsonResponse); err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	if jsonResponse.Success || len(jsonResponse.Payments) < 1 {
+		return http.StatusBadRequest, errors.New(jsonResponse.Message)
+	}
+
+	status := jsonResponse.Payments[0].Status
+	paymentID := jsonResponse.Payments[0].ID
+
+	if status != "successful" {
+		return http.StatusBadRequest, errors.New("Cannot initiate refund for an Unsuccessful transaction")
+	}
+
+	refundURL := fmt.Sprintf("/v2/payments/%s/refund/", paymentID)
+	params := url.Values{}
+	params.Set("type", refundType)
+	params.Set("refund_amount", amount)
+	params.Set("body", body)
+
+	refundRequest, err := http.NewRequest("POST", refundURL, bytes.NewBufferString(params.Encode()))
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	token, tErr := fetchToken()
+	if tErr != nil {
+		return 0, tErr
+	}
+
+	refundRequest.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	refundRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{}
+	resp, err := client.Do(refundRequest)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	return resp.StatusCode, nil
 }
