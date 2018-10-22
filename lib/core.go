@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/instamojo/sample-sdk-server/config"
 	"github.com/instamojo/sample-sdk-server/model"
 )
@@ -38,10 +39,7 @@ func init() {
 
 func setDefaultEnvironment() {
 	// Defaults to test config
-	env = testENV
-	imojoURL = config.Config.TestURL
-	clientID = config.Config.TestClientID
-	clientSecret = config.Config.TestClientSecret
+	setEnviroment(testENV)
 }
 
 func setEnviroment(newEnv string) {
@@ -50,14 +48,16 @@ func setEnviroment(newEnv string) {
 		return
 	}
 
+	env = newEnv
 	if env == prodENV {
-		env = prodENV
 		imojoURL = config.Config.ProdURL
 		clientID = config.Config.ProdClientID
 		clientSecret = config.Config.ProdClientSecret
 
 	} else {
-		setDefaultEnvironment()
+		imojoURL = config.Config.TestURL
+		clientID = config.Config.TestClientID
+		clientSecret = config.Config.TestClientSecret
 	}
 }
 
@@ -91,14 +91,14 @@ func fetchToken() (*model.OAuth2Token, error) {
 func CreateOrder(request model.GetOrderIDRequest) (*model.Order, error) {
 	setEnviroment(strings.ToLower(request.Env))
 
-	// Create payment request
-	paymentRequest, prErr := createPaymentRequest(request)
+	// Create GatewayOrder
+	gatewayOrderResponse, prErr := createGatewayOrder(request)
 	if prErr != nil {
 		return nil, prErr
 	}
 
-	// Create an order for a payment request
-	order, oErr := createOrderForPR(paymentRequest.ID)
+	// Create Order
+	order, oErr := createOrderForGWOrder(gatewayOrderResponse.Order.ID)
 	if oErr != nil {
 		return nil, oErr
 	}
@@ -107,17 +107,19 @@ func CreateOrder(request model.GetOrderIDRequest) (*model.Order, error) {
 	return order, nil
 }
 
-func createPaymentRequest(getOrderIDRequest model.GetOrderIDRequest) (*model.PaymentRequest, error) {
+func createGatewayOrder(getOrderIDRequest model.GetOrderIDRequest) (*model.GatewayOrderResponse, error) {
 	log.Println("Creating payment request")
-	paymentRequest := model.PaymentRequest{}
-	paymentRequest.BuyerName = getOrderIDRequest.BuyerName
-	paymentRequest.Email = getOrderIDRequest.BuyerEmail
-	paymentRequest.Phone = getOrderIDRequest.BuyerPhone
-	paymentRequest.Amount = getOrderIDRequest.Amount
-	paymentRequest.Purpose = getOrderIDRequest.Description
+	gatewayOrder := model.GatewayOrder{}
+	gatewayOrder.Name = getOrderIDRequest.BuyerName
+	gatewayOrder.Email = getOrderIDRequest.BuyerEmail
+	gatewayOrder.Phone = getOrderIDRequest.BuyerPhone
+	gatewayOrder.Amount = getOrderIDRequest.Amount
+	gatewayOrder.Description = getOrderIDRequest.Description
+	gatewayOrder.Currency = "INR"
+	gatewayOrder.TransactionID = uuid.New().String()
 
-	jsonPaymentRequest, _ := json.Marshal(paymentRequest)
-	httpRequest, _ := http.NewRequest("POST", imojoURL+"/v2/payment_requests/", bytes.NewBuffer(jsonPaymentRequest))
+	jsonPaymentRequest, _ := json.Marshal(gatewayOrder)
+	httpRequest, _ := http.NewRequest("POST", imojoURL+"/v2/gateway/orders/", bytes.NewBuffer(jsonPaymentRequest))
 	token, tErr := fetchToken()
 	if tErr != nil {
 		return nil, tErr
@@ -131,19 +133,19 @@ func createPaymentRequest(getOrderIDRequest model.GetOrderIDRequest) (*model.Pay
 		return nil, err
 	}
 
-	var createdPaymentRequest model.PaymentRequest
-	decodeErr := json.NewDecoder(httpResponse.Body).Decode(&createdPaymentRequest)
+	var gatewayOrderResponse model.GatewayOrderResponse
+	decodeErr := json.NewDecoder(httpResponse.Body).Decode(&gatewayOrderResponse)
 	if decodeErr != nil {
 		return nil, decodeErr
 	}
 
-	return &createdPaymentRequest, nil
+	return &gatewayOrderResponse, nil
 }
 
-func createOrderForPR(paymentRequestID string) (*model.Order, error) {
+func createOrderForGWOrder(gatewayOrderID string) (*model.Order, error) {
 	log.Println("Creating order for payment request")
 	orderRequest := model.OrderRequest{}
-	orderRequest.PaymentRequestID = paymentRequestID
+	orderRequest.PaymentRequestID = gatewayOrderID
 
 	jsonOrderRequest, _ := json.Marshal(orderRequest)
 	httpRequest, _ := http.NewRequest("POST", imojoURL+"/v2/gateway/orders/payment-request/", bytes.NewBuffer(jsonOrderRequest))

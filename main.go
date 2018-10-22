@@ -37,6 +37,7 @@ func createOrder(w http.ResponseWriter, r *http.Request) {
 	printRequest(r)
 
 	if r.Body == nil {
+		log.Println("no body")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -44,6 +45,7 @@ func createOrder(w http.ResponseWriter, r *http.Request) {
 	var getOrderIDRequest model.GetOrderIDRequest
 	goErr := json.NewDecoder(r.Body).Decode(&getOrderIDRequest)
 	if goErr != nil {
+		log.Printf("decoder error %v", goErr)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}

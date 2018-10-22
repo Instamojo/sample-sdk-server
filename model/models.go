@@ -28,19 +28,28 @@ type OAuth2Token struct {
 	Scope string `json:"scope"`
 }
 
-// PaymentRequest is request for a new payment for a buyer
-type PaymentRequest struct {
+// GatewayOrder is the request to create a gateway order
+type GatewayOrder struct {
 	ID string `json:"id"`
 
-	Purpose string `json:"purpose"`
-
-	BuyerName string `json:"buyer_name"`
+	Name string `json:"name"`
 
 	Email string `json:"email"`
 
 	Phone string `json:"phone"`
 
 	Amount string `json:"amount"`
+
+	Description string `json:"description"`
+
+	Currency string `json:"currency"`
+
+	TransactionID string `json:"transaction_id"`
+}
+
+// GatewayOrderResponse is the response of Create GatewayOrder call
+type GatewayOrderResponse struct {
+	Order GatewayOrder `json:"order"`
 }
 
 // OrderRequest is request to create an order for a payment request
