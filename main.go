@@ -79,7 +79,7 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 	orderID := r.FormValue("order_id")
 	transactionID := r.FormValue("transaction_id")
 
-	data, err := lib.GetOrderStatus(env, r.Header.Get("Authorization"), orderID, transactionID)
+	data, err := lib.GetOrderStatus(env, orderID, transactionID)
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)

@@ -3,6 +3,7 @@ package lib
 import (
 	"bytes"
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -171,32 +172,46 @@ func createOrderForGWOrder(gatewayOrderID string) (*model.Order, error) {
 	return &createdOrder, nil
 }
 
-//GetOrderStatus return the status of the order referencing either orderID or transactionID. Preference will be given to
-//orderID
-func GetOrderStatus(env, authorizationHeader, orderID, transactionID string) ([]byte, error) {
-	// statusRequest, err := http.NewRequest("GET", imojoURL+"/v2/gateway/orders/", nil)
-	// if err != nil {
-	// 	return []byte(""), err
-	// }
-	//
-	// statusRequest.Header.Set("Authorization", authorizationHeader)
-	// statusRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	//
-	// client := &http.Client{}
-	// resp, err := client.Do(statusRequest)
-	// if err != nil {
-	// 	return []byte(""), err
-	// }
-	//
-	// data, err := ioutil.ReadAll(resp.Body)
-	// defer resp.Body.Close()
-	//
-	// if err != nil {
-	// 	return []byte(""), err
-	// }
-	//
-	// return data, nil
-	return []byte(""), nil
+// GetOrderStatus return the status of the order referencing either orderID or transactionID.
+// Preference will be given to orderID
+func GetOrderStatus(env, orderID, transactionID string) ([]byte, error) {
+	setEnviroment(strings.ToLower(env))
+
+	statusURL := imojoURL + "/v2/gateway/orders/"
+	if orderID == "" {
+		statusURL += "transaction_id:" + transactionID + "/"
+
+	} else {
+		statusURL += "id:" + orderID + "/"
+	}
+
+	statusRequest, err := http.NewRequest("GET", statusURL, nil)
+	if err != nil {
+		return []byte(""), err
+	}
+
+	token, tErr := fetchToken()
+	if tErr != nil {
+		return nil, tErr
+	}
+
+	statusRequest.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	statusRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{}
+	resp, err := client.Do(statusRequest)
+	if err != nil {
+		return []byte(""), err
+	}
+
+	data, err := ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
+
+	if err != nil {
+		return []byte(""), err
+	}
+
+	return data, nil
 }
 
 //InitiateRefund wil initiate refund for the paymentID for the given with given refund reason
