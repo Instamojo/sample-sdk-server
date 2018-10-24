@@ -45,6 +45,12 @@ type GatewayOrder struct {
 	Currency string `json:"currency"`
 
 	TransactionID string `json:"transaction_id"`
+
+	Payments []Payment `json:"payments"`
+
+	Status string `json:"status"`
+
+	RedirectURL string `json:"redirect_url"`
 }
 
 // GatewayOrderResponse is the response of Create GatewayOrder call
@@ -68,4 +74,26 @@ type Order struct {
 	Phone string `json:"phone"`
 
 	Amount string `json:"amount"`
+}
+
+// GatewayOrderStatus returns the status of the payment order
+type GatewayOrderStatus struct {
+	Amount string `json:"amount"`
+
+	Status string `json:"status"`
+
+	PaymentID string `json:"payment_id"`
+}
+
+// Payment has details of order payment
+type Payment struct {
+	ID string `json:"id"`
+
+	Status string `json:"status"`
+
+	InstrumentType string `json:"instrument_type"`
+
+	BillingInstrument string `json:"billing_instrument"`
+
+	Failure string `json:"failure"`
 }

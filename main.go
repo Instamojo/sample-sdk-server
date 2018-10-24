@@ -79,14 +79,21 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 	orderID := r.FormValue("order_id")
 	transactionID := r.FormValue("transaction_id")
 
-	data, err := lib.GetOrderStatus(env, orderID, transactionID)
+	gatewayOrderStatus, err := lib.GetOrderStatus(env, orderID, transactionID)
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	bytes, err := json.Marshal(gatewayOrderStatus)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(bytes)
 }
 
 func refundHandler(w http.ResponseWriter, r *http.Request) {
