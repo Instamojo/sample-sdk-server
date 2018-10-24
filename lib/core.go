@@ -3,10 +3,9 @@ package lib
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"strings"
 
@@ -17,16 +16,6 @@ import (
 
 const testENV = "test"
 const prodENV = "production"
-
-var refundTypes = map[string]string{
-	"RFD": "Duplicate/delayed payment.",
-	"TNR": "Product/service no longer available.",
-	"QFL": "Customer not satisfied.",
-	"QNR": "Product lost/damaged.",
-	"EWN": "Digital download issue.",
-	"TAN": "Event was canceled/changed.",
-	"PTH": "Problem not described above.",
-}
 
 var env string
 var clientID string
@@ -140,8 +129,6 @@ func createGatewayOrder(getOrderIDRequest model.GetOrderIDRequest) (*model.Gatew
 		return nil, err
 	}
 
-	printResponse(httpResponse)
-
 	var gatewayOrderResponse model.GatewayOrderResponse
 	decodeErr := json.NewDecoder(httpResponse.Body).Decode(&gatewayOrderResponse)
 	if decodeErr != nil {
@@ -172,8 +159,6 @@ func createOrderForGWOrder(gatewayOrderID string) (*model.Order, error) {
 		return nil, err
 	}
 
-	printResponse(httpResponse)
-
 	var createdOrder model.Order
 	decodeErr := json.NewDecoder(httpResponse.Body).Decode(&createdOrder)
 	if decodeErr != nil {
@@ -188,47 +173,10 @@ func createOrderForGWOrder(gatewayOrderID string) (*model.Order, error) {
 func GetOrderStatus(env, orderID, transactionID string) (*model.GatewayOrderStatus, error) {
 	setEnviroment(strings.ToLower(env))
 
-	log.Println(orderID)
-	log.Println(transactionID)
-
-	statusURL := imojoURL + "/v2/gateway/orders/"
-	if orderID == "" {
-		statusURL += "transaction_id:" + transactionID + "/"
-
-	} else {
-		statusURL += "id:" + orderID + "/"
-	}
-	log.Println(statusURL)
-
-	statusRequest, err := http.NewRequest("GET", statusURL, nil)
+	gatewayOrder, err := getGatewayOrder(orderID, transactionID)
 	if err != nil {
 		log.Printf("Error %v", err)
 		return nil, err
-	}
-
-	token, tErr := fetchToken()
-	if tErr != nil {
-		log.Printf("Error %v", tErr)
-		return nil, tErr
-	}
-
-	statusRequest.Header.Set("Authorization", "Bearer "+token.AccessToken)
-	statusRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	client := &http.Client{}
-	httpResponse, err := client.Do(statusRequest)
-	if err != nil {
-		log.Printf("Error %v", err)
-		return nil, err
-	}
-
-	printResponse(httpResponse)
-
-	var gatewayOrder model.GatewayOrder
-	decodeErr := json.NewDecoder(httpResponse.Body).Decode(&gatewayOrder)
-	if decodeErr != nil {
-		log.Printf("Decode Error %v", decodeErr)
-		return nil, decodeErr
 	}
 
 	var gatewayOrderStatus model.GatewayOrderStatus
@@ -242,6 +190,47 @@ func GetOrderStatus(env, orderID, transactionID string) (*model.GatewayOrderStat
 	return &gatewayOrderStatus, nil
 }
 
+func getGatewayOrder(orderID, transactionID string) (*model.GatewayOrder, error) {
+	orderURL := imojoURL + "/v2/gateway/orders/"
+	if orderID == "" {
+		orderURL += "transaction_id:" + transactionID + "/"
+
+	} else {
+		orderURL += "id:" + orderID + "/"
+	}
+
+	orderRequest, err := http.NewRequest("GET", orderURL, nil)
+	if err != nil {
+		log.Printf("Error %v", err)
+		return nil, err
+	}
+
+	token, tErr := fetchToken()
+	if tErr != nil {
+		log.Printf("Error %v", tErr)
+		return nil, tErr
+	}
+
+	orderRequest.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	orderRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{}
+	httpResponse, err := client.Do(orderRequest)
+	if err != nil {
+		log.Printf("Error %v", err)
+		return nil, err
+	}
+
+	var gatewayOrder model.GatewayOrder
+	decodeErr := json.NewDecoder(httpResponse.Body).Decode(&gatewayOrder)
+	if decodeErr != nil {
+		log.Printf("Decode Error %v", decodeErr)
+		return nil, decodeErr
+	}
+
+	return &gatewayOrder, nil
+}
+
 //InitiateRefund wil initiate refund for the paymentID for the given with given refund reason
 //refundType should be within the following types
 //RFD: Duplicate/delayed payment.
@@ -251,81 +240,47 @@ func GetOrderStatus(env, orderID, transactionID string) (*model.GatewayOrderStat
 //EWN: Digital download issue.
 //TAN: Event was canceled/changed.
 //PTH: Problem not described above.
-func InitiateRefund(env, transactionID, amount, refundType, body string) (int, error) {
-	// setEnviroment(env)
-	//
-	// if _, exist := refundTypes[refundType]; !exist {
-	// 	return http.StatusBadRequest, errors.New("Invalid refund type " + refundType)
-	// }
-	//
-	// gatewayOrderStatus, err := GetOrderStatus(env, "", transactionID)
-	// if err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	//
-	// var jsonResponse struct {
-	// 	ID            string `json:"id"`
-	// 	TransactionID string `json:"transaction_id"`
-	// 	Payments      []struct {
-	// 		ID     string `json:"id"`
-	// 		Status string `json:"status"`
-	// 	} `json:"payments"`
-	// 	Success bool   `json:"success"`
-	// 	Message string `json:"message"`
-	// }
-	//
-	// if err := json.Unmarshal(data, &jsonResponse); err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	//
-	// if jsonResponse.Success || len(jsonResponse.Payments) < 1 {
-	// 	return http.StatusBadRequest, errors.New(jsonResponse.Message)
-	// }
-	//
-	// status := jsonResponse.Payments[0].Status
-	// paymentID := jsonResponse.Payments[0].ID
-	//
-	// if status != "successful" {
-	// 	return http.StatusBadRequest, errors.New("Cannot initiate refund for an Unsuccessful transaction")
-	// }
-	//
-	// refundURL := fmt.Sprintf("/v2/payments/%s/refund/", paymentID)
-	// params := url.Values{}
-	// params.Set("type", refundType)
-	// params.Set("refund_amount", amount)
-	// params.Set("body", body)
-	//
-	// refundRequest, err := http.NewRequest("POST", refundURL, bytes.NewBufferString(params.Encode()))
-	// if err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	//
-	// token, tErr := fetchToken()
-	// if tErr != nil {
-	// 	return 0, tErr
-	// }
-	//
-	// refundRequest.Header.Set("Authorization", "Bearer "+token.AccessToken)
-	// refundRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	//
-	// client := &http.Client{}
-	// resp, err := client.Do(refundRequest)
-	// if err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	// _, err = ioutil.ReadAll(resp.Body)
-	// if err != nil {
-	// 	return http.StatusInternalServerError, err
-	// }
-	//
-	// return resp.StatusCode, nil
-	return 0, nil
-}
+func InitiateRefund(env, transactionID, amount string) (int, error) {
+	setEnviroment(env)
 
-func printResponse(response *http.Response) {
-	responseDump, err := httputil.DumpResponse(response, true)
+	gatewayOrder, err := getGatewayOrder("", transactionID)
 	if err != nil {
-		fmt.Println(err)
+		return http.StatusInternalServerError, err
 	}
-	fmt.Println(string(responseDump))
+
+	if gatewayOrder.Success || len(gatewayOrder.Payments) < 1 {
+		return http.StatusBadRequest, errors.New(gatewayOrder.Message)
+	}
+
+	payment := gatewayOrder.Payments[0]
+
+	if payment.Status != "successful" {
+		return http.StatusBadRequest, errors.New("Cannot initiate refund for an Unsuccessful transaction")
+	}
+
+	refundURL := imojoURL + "/v2/payments/" + payment.ID + "/refund/"
+	params := url.Values{}
+	params.Set("type", "PTH")
+	params.Set("refund_amount", amount)
+	params.Set("body", "Refund the Amount")
+
+	refundRequest, err := http.NewRequest("POST", refundURL, bytes.NewBufferString(params.Encode()))
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	token, tErr := fetchToken()
+	if tErr != nil {
+		return 0, tErr
+	}
+
+	refundRequest.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	refundRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	httpResponse, err := client.Do(refundRequest)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	return httpResponse.StatusCode, nil
 }

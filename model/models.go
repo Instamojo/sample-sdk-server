@@ -51,6 +51,10 @@ type GatewayOrder struct {
 	Status string `json:"status"`
 
 	RedirectURL string `json:"redirect_url"`
+
+	Success bool `json:"success"`
+
+	Message string `json:"message"`
 }
 
 // GatewayOrderResponse is the response of Create GatewayOrder call

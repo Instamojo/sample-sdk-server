@@ -17,10 +17,9 @@ func main() {
 	log.SetFlags(log.Lshortfile)
 
 	router := mux.NewRouter()
-	router.HandleFunc("/order/", createOrder).Methods("POST")
 	router.HandleFunc("/order", createOrder).Methods("POST")
 	router.HandleFunc("/status", statusHandler).Methods("GET")
-	router.HandleFunc("/refund/", refundHandler).Methods("POST")
+	router.HandleFunc("/refund", refundHandler).Methods("POST")
 	router.HandleFunc("/ping", pingHandler).Methods("GET")
 
 	port := os.Getenv("PORT")
@@ -105,13 +104,12 @@ func refundHandler(w http.ResponseWriter, r *http.Request) {
 	env := r.FormValue("env")
 	transactionID := r.FormValue("transaction_id")
 	amount := r.FormValue("amount")
-	refundType := r.FormValue("type")
-	body := r.FormValue("body")
 
-	statusCode, err := lib.InitiateRefund(env, transactionID, amount, refundType, body)
+	statusCode, err := lib.InitiateRefund(env, transactionID, amount)
 	if err != nil {
 		log.Println(err)
 	}
+
 	w.WriteHeader(statusCode)
 }
 
