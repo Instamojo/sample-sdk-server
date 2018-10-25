@@ -101,7 +101,7 @@ func CreateOrder(request model.GetOrderIDRequest) (*model.Order, error) {
 }
 
 func createGatewayOrder(getOrderIDRequest model.GetOrderIDRequest) (*model.GatewayOrderResponse, error) {
-	log.Println("Creating payment request")
+	log.Println("Creating gateway order")
 	gatewayOrder := model.GatewayOrder{}
 	gatewayOrder.Name = getOrderIDRequest.BuyerName
 	gatewayOrder.Email = getOrderIDRequest.BuyerEmail
@@ -140,7 +140,7 @@ func createGatewayOrder(getOrderIDRequest model.GetOrderIDRequest) (*model.Gatew
 }
 
 func createOrderForGWOrder(gatewayOrderID string) (*model.Order, error) {
-	log.Printf("Creating order for payment request ID %s", gatewayOrderID)
+	log.Printf("Creating order for gateway order (payment request) ID %s", gatewayOrderID)
 	orderRequest := model.OrderRequest{}
 	orderRequest.PaymentRequestID = gatewayOrderID
 
@@ -232,14 +232,6 @@ func getGatewayOrder(orderID, transactionID string) (*model.GatewayOrder, error)
 }
 
 //InitiateRefund wil initiate refund for the paymentID for the given with given refund reason
-//refundType should be within the following types
-//RFD: Duplicate/delayed payment.
-//TNR: Product/service no longer available.
-//QFL: Customer not satisfied.
-//QNR: Product lost/damaged.
-//EWN: Digital download issue.
-//TAN: Event was canceled/changed.
-//PTH: Problem not described above.
 func InitiateRefund(env, transactionID, amount string) (int, error) {
 	setEnviroment(env)
 
@@ -260,9 +252,17 @@ func InitiateRefund(env, transactionID, amount string) (int, error) {
 
 	refundURL := imojoURL + "/v2/payments/" + payment.ID + "/refund/"
 	params := url.Values{}
+	// refundType should be within the following types
+	// RFD: Duplicate/delayed payment.
+	// TNR: Product/service no longer available.
+	// QFL: Customer not satisfied.
+	// QNR: Product lost/damaged.
+	// EWN: Digital download issue.
+	// TAN: Event was canceled/changed.
+	// PTH: Problem not described above.
 	params.Set("type", "PTH")
 	params.Set("refund_amount", amount)
-	params.Set("body", "Refund the Amount")
+	params.Set("body", "Refund the amount after test payment")
 
 	refundRequest, err := http.NewRequest("POST", refundURL, bytes.NewBufferString(params.Encode()))
 	if err != nil {

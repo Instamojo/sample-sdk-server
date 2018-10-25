@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"os"
 
 	"github.com/Instamojo/sample-sdk-server/lib"
@@ -33,8 +32,6 @@ func main() {
 }
 
 func createOrder(w http.ResponseWriter, r *http.Request) {
-	printRequest(r)
-
 	if r.Body == nil {
 		log.Println("no body")
 		w.WriteHeader(http.StatusBadRequest)
@@ -115,20 +112,4 @@ func refundHandler(w http.ResponseWriter, r *http.Request) {
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-}
-
-func printRequest(request *http.Request) {
-	requestDump, err := httputil.DumpRequest(request, true)
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(string(requestDump))
-}
-
-func printResponse(response *http.Response) {
-	responseDump, err := httputil.DumpResponse(response, true)
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(string(responseDump))
 }
