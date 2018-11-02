@@ -1,7 +1,7 @@
 package main
 
 import (
-	"flag"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,39 +9,16 @@ import (
 
 	"github.com/Instamojo/sample-sdk-server/lib"
 	"github.com/gorilla/mux"
+	"github.com/instamojo/sample-sdk-server/model"
 )
 
 func main() {
 	log.SetFlags(log.Lshortfile)
-	prodClientID := flag.String("production-client-id", "", "Production Client ID")
-	prodClientSecret := flag.String("production-client-secret", "", "Production Client Secret")
-	testClientID := flag.String("test-client-id", "", "Test Client ID")
-	testClientSecret := flag.String("test-client-secret", "", "Test Client Secret")
-	flag.Parse()
-
-	if *prodClientID == "" {
-		log.Fatal("Production Client ID is missing")
-	}
-
-	if *prodClientSecret == "" {
-		log.Fatal("Production Client secret is missing")
-	}
-
-	if *testClientID == "" {
-		log.Fatal("Test Client ID is missing")
-	}
-
-	if *testClientSecret == "" {
-		log.Fatal("Test Client Secret is missing")
-	}
-
-	lib.SetCredentials(*prodClientID, *prodClientSecret, *testClientID, *testClientSecret)
 
 	router := mux.NewRouter()
-	router.HandleFunc("/create/", createOrderTokens).Methods("POST")
-	router.HandleFunc("/create", createOrderTokens).Methods("POST")
+	router.HandleFunc("/order", createOrder).Methods("POST")
 	router.HandleFunc("/status", statusHandler).Methods("GET")
-	router.HandleFunc("/refund/", refundHandler).Methods("POST")
+	router.HandleFunc("/refund", refundHandler).Methods("POST")
 	router.HandleFunc("/ping", pingHandler).Methods("GET")
 
 	port := os.Getenv("PORT")
@@ -54,20 +31,38 @@ func main() {
 	log.Fatal(http.ListenAndServe(serverAddr, LoggingHandler(router)))
 }
 
-func createOrderTokens(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
+func createOrder(w http.ResponseWriter, r *http.Request) {
+	if r.Body == nil {
+		log.Println("no body")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	data, err := lib.CreateOrderTokens(r.FormValue("env"))
+	var getOrderIDRequest model.GetOrderIDRequest
+	goErr := json.NewDecoder(r.Body).Decode(&getOrderIDRequest)
+	if goErr != nil {
+		log.Printf("decoder error %v", goErr)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	createdOrder, err := lib.CreateOrder(getOrderIDRequest)
 	if err != nil {
-		log.Println(err)
+		log.Fatalf("Order creation failed. Error : %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("Created order: %+v", createdOrder)
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	bytes, err := json.Marshal(createdOrder)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(bytes)
 }
 
 func statusHandler(w http.ResponseWriter, r *http.Request) {
@@ -80,14 +75,21 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 	orderID := r.FormValue("order_id")
 	transactionID := r.FormValue("transaction_id")
 
-	data, err := lib.GetOrderStatus(env, r.Header.Get("Authorization"), orderID, transactionID)
+	gatewayOrderStatus, err := lib.GetOrderStatus(env, orderID, transactionID)
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	bytes, err := json.Marshal(gatewayOrderStatus)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(bytes)
 }
 
 func refundHandler(w http.ResponseWriter, r *http.Request) {
@@ -99,13 +101,12 @@ func refundHandler(w http.ResponseWriter, r *http.Request) {
 	env := r.FormValue("env")
 	transactionID := r.FormValue("transaction_id")
 	amount := r.FormValue("amount")
-	refundType := r.FormValue("type")
-	body := r.FormValue("body")
 
-	statusCode, err := lib.InitiateRefund(env, r.Header.Get("Authorization"), transactionID, amount, refundType, body)
+	statusCode, err := lib.InitiateRefund(env, transactionID, amount)
 	if err != nil {
 		log.Println(err)
 	}
+
 	w.WriteHeader(statusCode)
 }
 
